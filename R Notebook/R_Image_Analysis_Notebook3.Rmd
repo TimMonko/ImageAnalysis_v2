@@ -18,8 +18,8 @@ library(broom) # Tidy's up some statistical outputs
 library(magick) # A more general image altering package
 library(imager) # For loading of stacks, I think to be used with magick
 library(shiny) # Not needed when running as .Rmd, but when working through individual chunks it is necessary to load (the YAML header does it with runtime:shiny during .Rmd)
-library(knitr)
-library(DT)
+library(knitr) # Helpful for some functions when not running as .Rmd as with shiny
+library(DT) # Use this for rendering datatable as html output widgets (shiny:: and DT:: share renderDataTable) 
 ```
 
 ### File Information and Extraction
@@ -40,6 +40,8 @@ If named consistently and correctly, then information about the image can be scr
 * If the information is not extractable, then hard coded variables can be used such as `"WT"` or `"Pair 6"`, but all files will receive that text information. *This is not ideal and you should instead be naming your files so that they are compatible with extracting information from the filename string.*
 
 ```{r global_parameters, echo=FALSE}
+
+# Use these various functions to create shiny reactive input widgets, placing in inputPanel nicely organizes them 
 inputPanel(
   textInput("genotype", label = "Genotype", value = 'WT|CKO'),
   textInput("pair", label = "Pair", value = '(?<=Pr)[:digit:]{1,2}'),
@@ -51,6 +53,8 @@ inputPanel(
 ```
 
 ```{r image_analysis, echo = FALSE}
+# A note, generally, about reactivity and interpretation of looped files. While looping can be useful in some context, such as this situation when interpretating an individual file type (and is more readable than using functions on a list -- especially because you would have to load in potentially GBs of data). In this situation, we want to make sure this is not a reactable feature of the code, as each reactive event would require re-analyzing every element of the dataset. 
+
 
 for (im in 1:length(file.paths)) {
   # Import complex files with Magick, and then convert to cimg format for use with the imager analysis tools. Imager `load.image` only supports PNG, JPEG and BMP
@@ -87,7 +91,10 @@ for (im in 1:length(file.paths)) {
 ``` 
 
 ``` {r reactive_tibblecenters, echo = FALSE}
+# Now, after gleaning the basic, non-interactable features of the imported data reactive functions to scrape and change information is quite useful. 
 
+
+# Ungroup the 
 all.centers <- ungroup(all.centers)
 
 re.all.centers <- reactive({

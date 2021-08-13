@@ -1,0 +1,200 @@
+---
+title: "Statistics and Plotting of Cells Analyzed with ImageJ and R"
+author: "Tim Monko"
+date: "`r Sys.Date()`"
+runtime: shiny
+output: 
+  html_notebook: 
+    theme: spacelab
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r global_options, include = FALSE}
+
+library(tidyverse) # Includes ggplot2, tidyr, dplyr, stringr, readr, tibble, purrr, forcats
+library(svglite) # For exporting plots as .svg graphics to use as vector format
+library(extrafont) # README: https://cran.r-project.org/web/packages/extrafont/README.html
+#font_import(path = 'C:/Users/TimMonko/AppData/Local/Microsoft/Windows/Fonts') # for custom installed .ttf fonts
+library(broom) # Tidy's up some statistical outputs
+library(ggh4x)
+library(MANOVA.RM)
+library(rstatix)
+library(ggpubr)
+library(shiny) # Not needed when running as .Rmd, but when working through individual chunks it is necessary to load (the YAML header does it with runtime:shiny during .Rmd)
+library(shinyjqui) # For drag and drop functions such as orderInput
+library(knitr) # Helpful for some functions when not running as .Rmd as with shiny
+library(DT) # Use this for rendering datatable as html output widgets (shiny:: and DT:: share renderDataTable) 
+
+extrafont::loadfonts(device = "win", quiet = TRUE) 
+Sys.setenv(R_GSCMD="C:/Program Files/gs/gs9.52/bin/gswin64c.exe") # Set the location for Ghostscript for pdf embedding of fonts, use embed_fonts()
+
+`%notin%` = Negate(`%in%`) # Custom function used to define a group by what is NOT in the group
+
+```
+
+```{r data_management, echo = FALSE}
+wd.path <- getwd()
+file.paths <- list.files(path = wd.path, pattern = '\\.csv$')
+
+csv_bind <- function(wd.path = getwd(), text.pattern){
+  bound <- do.call(rbind,
+                    lapply(list.files(path = wd.path, pattern = text.pattern),
+                           function(x) read_csv(x)))
+  return(bound)
+}
+
+all.data <- csv_bind(text.pattern = 'centers')
+
+wellPanel(
+  orderInput("z.ord", label = "Slice", items = unique(all.data$z)),
+  orderInput("genotype.ord", label = "Genotype", items = unique(all.data$genotype)),
+  orderInput("pair.ord", label = "Pair", items = unique(all.data$pair)),
+  orderInput("region.ord", label = "Region", items = unique(all.data$region)),
+  orderInput("age.ord", label = "Age", items = unique(all.data$age)),
+  orderInput("edu.ord", label = "EdU", items = unique(all.data$edu))
+)
+
+renderText("This value will rescale the pixel values to represent micrometers, for 10X on our microscope the value is 0.63492 (or 1pixel/1.575micrometers")
+numericInput("rescale", label = "rescale px/um", value = 0.63492)
+
+re.all.data <- reactive({
+  all.data %>% 
+    mutate(z = ordered(z, levels = input$z.ord)) %>%
+    mutate(genotype = ordered(genotype, levels = input$genotype.ord)) %>%
+    mutate(pair = ordered(pair, levels = input$pair.ord)) %>%
+    mutate(region = ordered(region, levels = input$region.ord)) %>%
+    mutate(age = ordered(age, levels = input$age.ord)) %>%
+    mutate(edu = ordered(edu, levels = input$edu.ord)) %>%
+    mutate(x.abs.right = (width-x)*input$rescale) %>%
+    mutate(x.abs.left = x*input$rescale) %>%
+    mutate(x.rel.right = x/width)
+})
+
+
+
+# renderText("All Data")
+# renderDT(re.all.data(), filter="top", class = 'nowrap', options = list(pageLength = 5, scrollX=TRUE))
+
+
+```
+
+```{r summarized_data, echo = FALSE}
+
+re.file.data <- reactive({
+  re.all.data() %>%
+    group_by(file, genotype, z, pair, region) %>%
+    summarize(n.cells = mean(n)) # mean is not really a required function, and should be changed , but need to have a summarize function
+})
+
+
+
+#### THIS IS THE SPOT THAT IS NOT RENDERING THE PLOT -->>> WHERE IS THE PLOT?
+re.file.data.wide <- reactive({
+  re.file.data() %>%
+    pivot_wider(id_cols = c(genotype, pair, region), names_from = z, values_from = n)
+})
+
+renderDT(re.file.data.wide())
+renderPrint(re.file.data.wide())
+
+
+
+# renderDT(re.file.data(), filter="top", class = 'nowrap', options = list(pageLength = 5, scrollX=TRUE))
+
+re.pair.data <- reactive({
+  re.file.data() %>%
+    group_by(genotype, z, pair, region) %>%
+    summarize(n.cells.mean = mean(n.cells), n.sd.cells = sd(n.cells))
+})
+
+
+
+renderDT(re.pair.data(), filter="top", class = 'nowrap', options = list(pageLength = 5, scrollX=TRUE))
+
+paired.t <- reactive({
+  re.pair.data() %>%
+    group_by(z, region) %>%
+    t_test(n.cells.mean ~ genotype, paired = TRUE) %>%
+    add_significance() %>%
+    mutate(p.signif = recode(p.signif,"ns"= "")) %>%
+    mutate(p = round(p, digits = 3)) %>%
+    mutate(p = format(p, digits = 3)) %>%
+    mutate(p = replace(p, p == 0, "<0.001"))
+})
+  
+renderDT(paired.t(), options = list(pageLength = 5, scrollX=TRUE))
+
+```
+
+```{r relative_data, echo=FALSE}
+
+re.relative.pair.data <- reactive({
+  re.pair.data() %>%
+    group_by(z, pair, region) %>%
+    summarize(CKO.rel = n.cells.mean[genotype == "CKO"]/n.cells.mean[genotype == "WT"]) %>%
+    mutate(CKO.log = log(CKO.rel))
+})
+
+renderDT(re.relative.pair.data(), filter="top", options = list(pageLength = 5, scrollX=TRUE))
+
+log.t <- reactive({
+  re.relative.pair.data() %>%
+    group_by(z, region) %>%
+    t_test(CKO.log ~ 0, mu = 0) %>%
+    add_significance() %>%
+    mutate(p.signif = recode(p.signif,"ns"= "")) %>%
+    mutate(p = round(p, digits = 3)) %>%
+    mutate(p = format(p, digits = 3)) %>%
+    mutate(p = replace(p, p == 0, "<0.001"))
+})
+
+renderDT(log.t(), options = list(pageLength = 5, scrollX=TRUE))
+
+```
+
+
+```{r plotting_oldstyle, echo = FALSE}
+# Preparing any kind of graph to be plotted, since that is most necessary
+cbp.Rel <-c('#999999', '#E69F00', '#56B4E9', '#009E73', '#D55E00', '#0072B2', '#CC79A7')
+cbp.Genotype <- c('#d95f02', '#7570b3')
+
+selectizeInput("z.plot", label = "slices to plot", choices = unique(all.data$z), multiple = TRUE)
+
+selectizeInput("scale.labels", label = "scale labels", choices = NULL, multiple = TRUE, options = list(create = TRUE))
+
+
+
+re.relative.pair.plot <- reactive({
+  re.relative.pair.data() %>%
+    filter(z %in% input$z.plot)
+})
+
+log.t.plot <- reactive({
+  log.t() %>%
+    filter(z %in% input$z.plot)
+})
+
+log.plot <- reactive({
+  ggplot(re.relative.pair.plot(), aes(x = z, y = CKO.rel, colour = z, fill = z, shape = z)) +
+    facet_nested_wrap(~region, strip.position = 'bottom', nrow = 1) +
+    theme_classic(base_size = 7) +
+    stat_summary(fun = "mean", geom = "col", width = 0.8, show.legend = FALSE) +
+    geom_hline(aes(yintercept = 1), linetype = 'dashed') +
+    geom_jitter(width = 0.1) +
+    stat_pvalue_manual(log.t.plot(), x = "z", label = "{p}", y.position = 1.02, size = 2.5, family = "Helvetica", srt = 0) +
+    scale_fill_manual(values = alpha(cbp.Rel, 0.25), name = NULL, labels = input$scale.labels) +
+    scale_colour_manual(values = cbp.Rel, name = NULL, labels = input$scale.labels) +
+    scale_shape_manual(values = c(21,22,24,23,25,10,12), name = NULL, labels = input$scale.labels) + 
+    labs(y = "Rel. Cell#, CKO/WT",
+       x = NULL) + # can use element_blank for no label at all
+    scale_x_discrete(breaks = NULL) +
+    scale_y_continuous(trans = "log10", breaks = seq(0,10,0.2), minor_breaks = seq(0,10,0.1), guide = "axis_minor") + #guide + "axis_minor" from ggh4x package
+    guides(color = guide_legend(override.aes = list(size = 2.5))) +
+    coord_cartesian(clip = "off")
+
+})
+
+renderPlot(log.plot())
+```
