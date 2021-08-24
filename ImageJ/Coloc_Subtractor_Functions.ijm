@@ -28,8 +28,8 @@
  */
  
 
-Object 	= newArray(	"ROR",
-					"BRN2"
+Object 	= newArray(	"ROR-low",
+					"ROR-high"
 					);
 Selector= newArray(	"EdU",
 					"EdU"
@@ -42,10 +42,10 @@ Selector= newArray(	"EdU",
  * 
  */
 
-Primary = newArray("ROR"
+Primary = newArray("ROR-low"
 				   );
 
-Subtractor = newArray("ROR_On_EdU"
+Subtractor = newArray("ROR-low_On_EdU"
 					  );
 
 // Prevents image windows from opening while the script is running -- unless altered with false, "show", or "hide"
