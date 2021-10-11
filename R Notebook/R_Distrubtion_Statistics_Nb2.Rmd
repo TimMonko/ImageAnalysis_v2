@@ -48,6 +48,9 @@ csv_bind <- function(wd.path = getwd(), text.pattern){
   return(bound)
 }
 all.data <- csv_bind(text.pattern = 'centers')
+var.names <- all.data %>%
+  pivot_wider(names_from = z, names_prefix = "z") %>%
+  colnames()
 rm.groups <- paste0(unique(all.data$region), "-", unique(all.data$pair))
 ```
 
@@ -62,8 +65,11 @@ wellPanel(
   orderInput("region.ord", label = "Region", items = unique(all.data$region)),
   orderInput("age.ord", label = "Age", items = unique(all.data$age)),
   orderInput("edu.ord", label = "EdU", items = unique(all.data$edu)),
-  selectizeInput("outlier.rm", label = "Outliers to remove", choices = rm.groups, multiple = TRUE)
+  selectizeInput("outlier.rm", label = "Outliers to remove", choices = rm.groups, multiple = TRUE),
+  selectizeInput("numerator", label = "numerator slice", choices = var.names, multiple = TRUE),
+  selectizeInput("denominator", label = "denominator slice", choices = var.names, multiple = TRUE)
 )
+
 
 renderText("This value will rescale the pixel values to represent micrometers, for 10X on our microscope the value is 0.63492 (or 1pixel/1.575micrometers")
 numericInput("rescale", label = "rescale px/um", value = 0.63492)
@@ -113,7 +119,7 @@ re.file.data <- reactive({
 #Display the data in wide, per-image format as would be done if someone was manually entering the data
 re.file.data.wide <- reactive({
   re.file.data() %>%
-    pivot_wider(id_cols = c(file, genotype, pair, region), names_from = z, values_from = n.cells)
+    pivot_wider(id_cols = c(file, genotype, pair, region), names_from = z, values_from = n.cells, names_prefix = "z")
 })
 
 renderDT(re.file.data.wide(), filter="top", class = 'nowrap', options = list(pageLength = 5, scrollX=TRUE))
@@ -151,33 +157,54 @@ renderDT(re.relative.pair.data(), filter="top", options = list(pageLength = 5, s
 
 ## Relative Slice data 
 
+  Divide numerator selection by denominator
+```{r relative_slice_new, echo = FALSE}
 
-THIS IS WHERE I'M STUCK, probably just hardcode with oldschool mutates and just get it to check like 5 groups and that's plenty, I guess? need to get a reactive variable name but it's probably just !!paste(input$numerator)
-
-```{r relative_slice_data, echo=FALSE}
-wellPanel(
-  selectizeInput("numerator", label = "numerator slice", choices = unique(all.data$z), multiple = TRUE),
-  selectizeInput("denominator", label = "denominator slice", choices = unique(all.data$z), multiple = TRUE)
-)
-
-#The summarized pair data above is then grouped (by slice, pair and region) and divided according to grouping such that CKO is divided by WT to creative a relative difference
-# The log of the relative difference is used because relative to 1 is not linear, but difference from 0 (as with log) can be used for comparison statistically
+# Widen mean cell data to select out dataframes for division
 re.divide.data <- reactive({
   re.pair.data() %>%
-    group_by(pair, region, genotype) %>%
-    summarize(rel1 = n.cells.mean[z == as.numeric(input$numerator[1])]/n.cells.mean[z == as.numeric(input$denominator[1])],
-              rel2 = n.cells.mean[z == as.numeric(input$numerator[2])]/n.cells.mean[z == as.numeric(input$denominator[2])],
-              rel3 = n.cells.mean[z == as.numeric(input$numerator[3])]/n.cells.mean[z == as.numeric(input$denominator[3])],
-              rel4 = n.cells.mean[z == as.numeric(input$numerator[4])]/n.cells.mean[z == as.numeric(input$denominator[4])],
-              rel5 = n.cells.mean[z == as.numeric(input$numerator[5])]/n.cells.mean[z == as.numeric(input$denominator[5])]) %>%
-    distinct()
+    group_by(genotype, pair, region) %>%
+    pivot_wider(id_cols = c(genotype, pair, region), names_from = z, values_from = n.cells.mean, names_prefix = "z")
+})
+
+#User input for selected numerator df and then denominator df
+re.numerator <- reactive({
+  re.divide.data() %>% 
+    ungroup() %>%
+    select(input$numerator)
+})
+
+re.denominator <- reactive({
+  re.divide.data() %>% 
+    ungroup() %>%
+    select(input$denominator)
+})
+
+# Matrix multipication using base R to create datasets
+re.divide <- reactive({
+  re.numerator() / re.denominator()
+})
+
+# Gets column names by pasting the user input numerator and denominator together for rename_with
+re.col.new <- reactive({
+  paste(input$numerator, input$denominator, sep = ".")
+})
+
+# rename_with to overwrite with function matching of column names to get new columns
+# https://stackoverflow.com/questions/20987295/rename-multiple-columns-by-names
+re.divide2 <- reactive({
+  re.divide() %>%
+    rename_with(~ re.col.new()[which(input$numerator == .x)], .cols = input$numerator)
 })
 
 
-renderDT(re.divide.data(), filter="top", options = list(pageLength = 5, scrollX=TRUE))
+# Combine datasets, they are ungrouped but not ever resorted so which match in length, bind_cols is very generic, but  will work because of no other data modiifcation in between 
+re.divide.bind <- reactive({
+  bind_cols(re.divide.data(), re.divide2())
+})
+
+renderDT(re.divide.bind(), filter="top", options = list(pageLength = 5, scrollX=TRUE))
 ```
-
-
 
 # Statistics {.tabset}
 ## Summary Stats Between Genotypes and Pairs
@@ -229,6 +256,28 @@ paired.t <- reactive({
 })
   
 renderDT(paired.t(), options = list(pageLength = 5, scrollX=TRUE))
+
+
+re.paired.t.data <- reactive({
+  re.divide.bind() %>%
+    pivot_longer(contains("."), names_to = "z", values_to = "value")
+})
+
+#select only columns from above relative made graph >contains(".")
+paired.t2 <- reactive({
+  re.paired.t.data() %>%
+    group_by(z, region) %>%
+    t_test(value ~ genotype, paired = TRUE) %>%
+    add_significance() %>%
+    mutate(p.signif = recode(p.signif,"ns"= "")) %>%
+    mutate(p = round(p, digits = 3)) %>%
+    mutate(p = format(p, digits = 3)) %>%
+    mutate(p = replace(p, p == 0, "<0.001"))
+})
+  
+renderDT(paired.t2(), options = list(pageLength = 5, scrollX=TRUE))
+
+
 
 ```
 
