@@ -51,6 +51,7 @@ all.data <- csv_bind(text.pattern = 'centers') # Uses above function to collect 
 # Collect unreactive variable names for Shiny input
 var.names <- all.data %>%
   pivot_wider(names_from = z, names_prefix = "z") %>%
+  select(contains("z")) %>%
   colnames()
 
 rm.groups <- paste0(unique(all.data$region), "-", unique(all.data$pair)) # Var for removing variables 
@@ -65,10 +66,12 @@ wellPanel(
   orderInput("pair.ord", label = "Pair", items = unique(all.data$pair)),
   orderInput("region.ord", label = "Region", items = unique(all.data$region)),
   orderInput("age.ord", label = "Age", items = unique(all.data$age)),
-  orderInput("edu.ord", label = "EdU", items = unique(all.data$edu)),
+  orderInput("edu.ord", label = "EdU", items = unique(all.data$edu))
+)
+inputPanel(
+  selectizeInput("numerator", label = "Numerator slice", choices = var.names, multiple = TRUE, options = list(create = TRUE)),
+  selectizeInput("denominator", label = "Denominator slice", choices = var.names, multiple = TRUE, options = list(create = TRUE)),
   selectizeInput("outlier.rm", label = "Outliers to remove", choices = rm.groups, multiple = TRUE),
-  selectizeInput("numerator", label = "Numerator slice", choices = var.names, multiple = TRUE),
-  selectizeInput("denominator", label = "Denominator slice", choices = var.names, multiple = TRUE),
   numericInput("rescale", label = "rescale px/um", value = 0.63492)
 )
 ```
@@ -326,7 +329,7 @@ log.t.plot <- reactive({
   log.t() %>%
     filter(z %in% input$l.z.plot)
 })
-
+renderDT(log.t.plot())
 # Function argument defaults are great and represent the original plots used in the original Gbx2 cKO pre-print. The only new variable is point.size, which has been added to satisfy readability on the notebook output. Matching the original point.size (as in geom_jitter(size = point.size)) is tricky because according to vignette("ggplot2-specs"), there is no default value for size. 
 fun_log_plot <- function(facet.strip.pos = 'bottom',
                          point.size = 1,
@@ -392,7 +395,7 @@ inputPanel(
   textInput("v.y.label", label = "y-axis title", value = "Rel. Cell# CKO/WT"),
   sliderInput("v.p.val.pos", label = "p-value position", value = 1.02, min = 0.5, max = 1.5, step = 0.01),
   selectizeInput("v.yaxis", label = "y-axis type", choices = c("auto","manual"), selected = "auto"),
-  sliderInput("v.ylim", label = "y-limits", min = 0, max = 5, value = c(0.1,1.5), step = 0.05)
+  sliderInput("v.ylim", label = "y-limits", min = 0, max = 1000, value = c(0,500), step = 50)
 )
 
 v.y.limits <- reactive({
@@ -405,12 +408,6 @@ re.file.plot <- reactive({
     filter(z %in% input$v.z.plot)
 })
 
-log.t.plot <- reactive({
-  log.t() %>%
-    filter(z %in% input$v.z.plot)
-})
-##### STOPPED HERE
-# Function argument defaults are great and represent the original plots used in the original Gbx2 cKO pre-print. The only new variable is point.size, which has been added to satisfy readability on the notebook output. Matching the original point.size (as in geom_jitter(size = point.size)) is tricky because according to vignette("ggplot2-specs"), there is no default value for size. 
 fun_var_plot <- function(facet.strip.pos = 'bottom',
                          point.size = 1,
                          p.val.size = 2,
@@ -419,52 +416,50 @@ fun_var_plot <- function(facet.strip.pos = 'bottom',
                          legend.size = 2.5
                          ){
   reactive({
-    ggplot(re.relative.pair.plot(), aes(x = z, y = CKO.rel, colour = z, fill = z, shape = z)) +
-      facet_nested_wrap(~region, strip.position = facet.strip.pos, nrow = 1) +
-      stat_summary(fun = "mean", geom = "col", width = 0.8, show.legend = FALSE) +
-      geom_hline(aes(yintercept = 1), linetype = 'dashed') +
+    ggplot(re.file.plot(), aes(x = genotype, y = n.cells, colour = pair, fill = pair, shape = pair)) +
+      facet_nested_wrap(~region * z * pair, strip.position = facet.strip.pos, nrow = 1) +
+      stat_summary(fun = "mean", geom = "point", size = 5, shape = "o") +
+      stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.3, show.legend = FALSE) +
       geom_jitter(width = 0.1, size = point.size) +
-      stat_pvalue_manual(log.t.plot(), x = "z", label = "{p}", y.position = input$l.p.val.pos, size = p.val.size, srt = 0) +
-      scale_fill_manual(values = alpha(cbp.Rel, 0.25), name = NULL, labels = input$l.scale.labels) +
-      scale_colour_manual(values = cbp.Rel, name = NULL, labels = input$l.scale.labels) +
-      scale_shape_manual(values = c(21,22,24,23,25,10,12), name = NULL, labels = input$l.scale.labels) +
-      labs(y = input$l.y.label,
-       x = NULL) + # can use element_blank for no label at all
+      # stat_pvalue_manual(log.t.plot(), x = "z", label = "{p}", y.position = input$l.p.val.pos, size = p.val.size, srt = 0) +
+      scale_fill_manual(values = alpha(cbp.Rel, 0.25), name = NULL, labels = input$v.scale.labels) +
+      scale_colour_manual(values = cbp.Rel, name = NULL, labels = input$v.scale.labels) +
+      scale_shape_manual(values = c(21,22,24,23,25,10,12,13), name = NULL, labels = input$zv.scale.labels) +
+      labs(y = input$v.y.label,
+           x = NULL) + # can use element_blank for no label at all
       scale_x_discrete(breaks = NULL) +
-      scale_y_continuous(trans = "log10", breaks = seq(0,10,y.breaks.major), minor_breaks = seq(0,10,y.breaks.minor), guide = "axis_minor", limits = l.y.limits()) + #guide + "axis_minor" from ggh4x package
+      scale_y_continuous(limits = v.y.limits()) + #guide + "axis_minor" from ggh4x package
       guides(color = guide_legend(override.aes = list(size = legend.size))) +
       coord_cartesian(clip = "off")
   })
 }
 
-log.plot <- fun_log_plot(point.size = 4, p.val.size = 6, legend.size = 5)
-renderPlot(log.plot() + theme_Tim(base.size = 20))
+var.plot <- fun_var_plot(point.size = 4, p.val.size = 6, legend.size = 5)
+renderPlot(var.plot() + theme_Tim(base.size = 20))
 ```
 
 ### Saving the Plot 
 ``` {r saving_var, echo = FALSE}
 ## ADD REACTIVE HERE for file name
 inputPanel(
-  textInput("l.filename", label = "Plot Name", placeholder = "Your input here"),
-  radioButtons("l.filetype", label = "File Type", choices = c('pdf', 'png','svg')),
-  sliderInput("l.plot.width", label = "Plot Width, cm", min = 1, max = 12, value = 6, step = 0.5),
-  sliderInput("l.plot.height", label = "Plot Height, cm", min = 1, max = 8, value = 3, step = 0.5),
-  actionButton("l.filesave", label = "Save File")
+  textInput("v.filename", label = "Plot Name", placeholder = "Your input here"),
+  radioButtons("v.filetype", label = "File Type", choices = c('pdf', 'png','svg')),
+  sliderInput("v.plot.width", label = "Plot Width, cm", min = 1, max = 12, value = 6, step = 0.5),
+  sliderInput("v.plot.height", label = "Plot Height, cm", min = 1, max = 8, value = 3, step = 0.5),
+  actionButton("v.filesave", label = "Save File")
 )
 
 # This event reactive causes the ggsave to wait because it requires input from the reactive filename function. I'm not sure that this is the most efficient, because potentially ggsave should also be eventReactive. Largely, this event reactivity is important so that ggsave does not save a new file for each character that is typed. 
-l.filename.evre <- eventReactive(input$l.filesave, {
-   paste0(wd.path, "/", input$l.filename, ".", input$l.filetype)
+v.filename.evre <- eventReactive(input$v.filesave, {
+   paste0(wd.path, "/", input$v.filename, ".", input$v.filetype)
 })
 
 # Make this a function later, to then only print a specific plot
-l.print.plot <- fun_log_plot()
-l.print.plot2 <- reactive(l.print.plot() + theme_Tim())
+v.print.plot <- fun_var_plot()
+v.print.plot2 <- reactive(v.print.plot() + theme_Tim())
 
-reactive(ggsave(plot = l.print.plot2(), filename = l.filename.evre(), device = input$l.filetype, width = input$l.plot.width, height = input$l.plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
+reactive(ggsave(plot = v.print.plot2(), filename = v.filename.evre(), device = input$v.filetype, width = input$v.plot.width, height = input$v.plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
-
-
 
 ## Ratio Plot
 
