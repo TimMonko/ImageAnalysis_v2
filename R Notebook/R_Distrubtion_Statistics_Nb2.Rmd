@@ -94,9 +94,9 @@ re.all.data <- reactive({
     mutate(region.pair = paste0(region, "-", pair)) %>%
     mutate(age = ordered(age, levels = input$age.ord)) %>%
     mutate(edu = ordered(edu, levels = input$edu.ord)) %>%
-    mutate(x.abs.right = (width-x)*input$rescale) %>%
-    mutate(x.abs.left = x*input$rescale) %>%
-    mutate(x.rel.right = x/width) %>%
+    # mutate(x.abs.right = (width-x)*input$rescale) %>% # This will be done later for interactive distribution graphs. Allows backwards compatability with non-R image analysis datasets
+    # mutate(x.abs.left = x*input$rescale) %>%
+    # mutate(x.rel.right = x/width) %>%
     filter(region.pair %notin% input$outlier.rm)
 })
 
@@ -329,7 +329,7 @@ log.t.plot <- reactive({
   log.t() %>%
     filter(z %in% input$l.z.plot)
 })
-renderDT(log.t.plot())
+
 # Function argument defaults are great and represent the original plots used in the original Gbx2 cKO pre-print. The only new variable is point.size, which has been added to satisfy readability on the notebook output. Matching the original point.size (as in geom_jitter(size = point.size)) is tricky because according to vignette("ggplot2-specs"), there is no default value for size. 
 fun_log_plot <- function(facet.strip.pos = 'bottom',
                          point.size = 1,
@@ -468,8 +468,8 @@ reactive(ggsave(plot = v.print.plot2(), filename = v.filename.evre(), device = i
 inputPanel(
   selectizeInput("r.z.plot", label = "slices to plot", choices = unique(all.data$z), multiple = TRUE, options = list(create = TRUE)),
   selectizeInput("r.scale.labels", label = "scale labels", choices = NULL, multiple = TRUE, options = list(create = TRUE)),
-  textInput("r.y.label", label = "y-axis title", value = "Rel. Cell# CKO/WT"),
-  sliderInput("r.p.val.pos", label = "p-value nudge", value = 0.005, min = -0.1, max = 0.1, step = 0.001),
+  textInput("r.y.label", label = "y-axis title", value = "Ratio of Cells"),
+  sliderInput("r.p.val.pos", label = "p-value nudge", value = 0.060, min = -0.1, max = 0.1, step = 0.001),
   selectizeInput("r.yaxis", label = "y-axis type", choices = c("auto","manual"), selected = "auto"),
   sliderInput("r.ylim", label = "y-limits", min = 0, max = 5, value = c(0.1,1.5), step = 0.05)
 )
@@ -541,8 +541,3 @@ r.print.plot2 <- reactive(r.print.plot() + theme_Tim())
 
 reactive(ggsave(plot = r.print.plot2(), filename = r.filename.evre(), device = input$filetype, width = input$plot.width, height = input$plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
-
-
-
-
-
