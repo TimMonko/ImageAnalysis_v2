@@ -1,0 +1,142 @@
+---
+title: "Cell counts and distribution with R"
+author: "Tim Monko"
+date: "`r Sys.Date()`"
+runtime: shiny
+output: 
+  html_notebook: 
+    theme: spacelab
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r global_options, include = FALSE}
+library(tidyverse) # Includes ggplot2, tidyr, dplyr, stringr, readr, tibble, purrr, forcats
+library(svglite) # For exporting plots as .svg graphics to use as vector format
+library(broom) # Tidy's up some statistical outputs
+library(magick) # A more general image altering package
+library(imager) # For loading of stacks, I think to be used with magick
+library(shiny) # Not needed when running as .Rmd, but when working through individual chunks it is necessary to load (the YAML header does it with runtime:shiny during .Rmd)
+library(knitr) # Helpful for some functions when not running as .Rmd as with shiny
+library(DT) # Use this for rendering datatable as html output widgets (shiny:: and DT:: share renderDataTable) 
+```
+
+### File Information and Extraction
+
+*Use the datatable below to determine key information for organizing the information within the dataframe.*
+
+```{r data_import, echo=FALSE}
+wd.path <- getwd()
+file.paths <- fs::dir_ls(regexp = '\\.tif$')
+
+```
+If named consistently and correctly, then information about the image can be scraped using `stringr::str_extract()`. To collect this information we will use `dplyr::mutate()` with a format such as `mutate(age = )`. The information collected below determines what follows the `=` statement.
+
+* Use [the stringr cheatsheet](https://raw.githubusercontent.com/rstudio/cheatsheets/master/strings.pdf) if you need assistance in altering the str_extract variables
+
+* If the information is not extractable, then hard coded variables can be used such as `"WT"` or `"Pair 6"`, but all files will receive that text information. *This is not ideal and you should instead be naming your files so that they are compatible with extracting information from the filename string.*
+
+```{r global_parameters, echo=FALSE}
+
+# Use these various functions to create shiny reactive input widgets, placing in inputPanel nicely organizes them 
+inputPanel(
+  textInput("genotype", label = "Genotype", value = 'WT|CKO'),
+  textInput("pair", label = "Pair", value = '(?<=Pr)[:digit:]{1,2}'),
+  textInput("region", label = "Region", value = 'S1|V1'),
+  textInput("age", label = "Age", value = '(?<=P)[:digit:]{1,2}'),
+  textInput("edu", label = "EdU", value = '(?<=EdU)[:digit:]{1,2}')
+)
+
+```
+
+```{r image_analysis, echo = FALSE}
+# A note, generally, about reactivity and interpretation of looped files. While looping can be useful in some context, such as this situation when interpretating an individual file type (and is more readable than using functions on a list -- especially because you would have to load in potentially GBs of data). In this situation, we want to make sure this is not a reactable feature of the code, as each reactive event would require re-analyzing every element of the dataset. 
+
+
+for (im in 1:length(file.paths)) {
+  # Import complex files with Magick, and then convert to cimg format for use with the imager analysis tools. Imager `load.image` only supports PNG, JPEG and BMP
+  # Store as a Cimg as an eager representation of the original file. see: plot(image.cimg)
+  image <- image_read(file.paths[im]) 
+  image.cimg <- magick2cimg(image)   
+
+  image.dims <- dim(image.cimg)   # dim(image.px) [x/width, y/height, z/depth/slices, color channels]
+  
+  # Store as a pixset (a binary mask of booleans) -- either use as.pixset, or do a mathematical operation on the image
+  # Multi-channel images have data stored separately, as in [x,y,z,colour]. see: `here(image.px) %>% head` and also `imsplit(image.px, "z") %>% plot
+  image.px <- image.cimg > 0.5 # Keep pixels above 50% brightness (magick converts to 0-1 scale) -- this is only important if the image was previously straightened in imagej (and thus is grayscale), but either way converts the cimg to a pixset, which is important for the following math
+  image.label <- label(image.px, high_connectivity = FALSE)   # Label connected components, high_connectivity = FALSE is 4-connectivity in 2d case, and 6 in 3d case. can also set to true for 8-component connectivity 
+  tbl.label <- as.data.frame(image.label) %>% 
+    as_tibble %>% # Convert labeled pixset to tibble, need to use intermediate as.data.frame for compatability
+    subset(value > 0) # pixels labeled with value == 0 are the non-white cells in the image 
+  
+  tbl.centers <- tbl.label %>%
+    group_by(z, value) %>%
+    summarize(x = mean(x), y = mean(y), .groups = "drop_last") %>% # computes the means of the labeled group (via group_by of value, which represents the unique contiguous label)
+    add_count(z) %>% # adds a count column, works where `mutate(n = count(z))` does not compute
+    mutate(file = file.paths[im]) %>%
+    mutate(width = image.dims[1]) %>%
+    mutate(height = image.dims[2]) 
+  
+  test <- exists('all.centers')  
+  
+  if (test == FALSE) {
+    all.centers <- tbl.centers
+  } else {
+    all.centers <- bind_rows(all.centers, tbl.centers) 
+  }
+}
+``` 
+
+``` {r reactive_tibblecenters, echo = FALSE}
+# Now, after gleaning the basic, non-interactable features of the imported data reactive functions to scrape and change information is quite useful. 
+
+
+# Ungroup the 
+all.centers <- ungroup(all.centers)
+
+re.all.centers <- reactive({
+  all.centers %>%
+    mutate(genotype = str_extract(file, input$genotype)) %>%
+    mutate(pair = str_extract(file, input$pair)) %>%
+    mutate(region = str_extract(file, input$region)) %>%
+    mutate(age = str_extract(file, input$age)) %>%
+    mutate(edu = str_extract(file, input$edu)) %>%
+    relocate(file, genotype, pair, region, age, edu, .before = z)
+})
+
+re.all.centers2 <- reactive({
+  re.all.centers() %>%
+    mutate(genotype = replace_na(genotype, input$genotype)) %>%
+    mutate(pair = replace_na(pair, input$pair)) %>%
+    mutate(region = replace_na(region, input$region)) %>%
+    mutate(age = replace_na(age, input$age)) %>%
+    mutate(edu = replace_na(edu, input$edu))
+})
+```
+## Preview of Image Analysis Dataset 
+`r renderDT(re.all.centers2(), filter="top", class = 'nowrap', options = list(pageLength = 5, scrollX=TRUE))`
+
+These columns contain at least 1 or more NA values: 
+`r renderPrint({ re.all.centers() %>%
+    select_if(~ any(is.na(.))) %>% names()
+})`
+
+This could mean that there is an error in the naming of files (such as all files saying Pr7, except one which says Pair7) and that the information could be properly extracted OR this means that the `stringr::str_extract` expression you wrote is incorrect.
+
+All NA values will then be overwritten with `tidyr::replace_na` to be the exact expression entered above. This *can* be useful if your filename does not contain extractable info AND you wish to save information about all the images with the same parameter (e.g. all are at age "P8")
+
+Also, please verify that the dimensions of the images were sensibly determined and that the file was interpreted by imageMagick correctly: **`r image.dims` representing the X,Y,Z,C(olor) dimensions** 
+
+### Save the dataset
+``` {r saving, echo = FALSE}
+## ADD REACTIVE HERE for file name
+textInput("filename", label = "File Name", placeholder = "Your input here")
+actionButton("filesave", label = "Save File")
+
+filename.evre <- eventReactive(input$filesave, {
+   paste0(wd.path, "/", input$filename, "_all_centers.csv")
+})
+
+reactive(write_csv(re.all.centers2(), file = filename.evre()))
+```
