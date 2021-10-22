@@ -274,7 +274,7 @@ cbp.Rel <-c('#999999', '#E69F00', '#56B4E9', '#009E73', '#D55E00', '#0072B2', '#
 cbp.Genotype <- c('#d95f02', '#7570b3')
 # This ggplot theme-based function creates an excellent set of theme parameters, thus freeing up plotting functions to only rely strictly on plot-specific arguments. Unfortunately, plot arguments such as the size of a printed p.value can not be passed to the theme argument. This function relys strictly on theme() argument possibilities. Not having this in a separate package will be very helpful for future users of the code to not have to install a package. 
 theme_Tim <- function(base.size = 7,
-                      text.family = 'Helvetica',
+                      text.family = 'sans',
                       line.color = 'black',
                       bg.color = "transparent"
 ){
@@ -368,16 +368,18 @@ inputPanel(
   actionButton("l.filesave", label = "Save File")
 )
 
-# This event reactive causes the ggsave to wait because it requires input from the reactive filename function. I'm not sure that this is the most efficient, because potentially ggsave should also be eventReactive. Largely, this event reactivity is important so that ggsave does not save a new file for each character that is typed. 
+# This event reactive causes the ggsave to wait because it requires input from the reactive filename function. 
 l.filename.evre <- eventReactive(input$l.filesave, {
    paste0(wd.path, "/", input$l.filename, ".", input$l.filetype)
 })
 
-# Make this a function later, to then only print a specific plot
-l.print.plot <- fun_log_plot()
-l.print.plot2 <- reactive(l.print.plot() + theme_Tim())
+observeEvent(input$l.filesave, {
+  l.print.plot <- fun_log_plot()
+  l.print.plot2 <- reactive(l.print.plot() + theme_Tim())
+  ggsave(plot = l.print.plot2(), filename = l.filename.evre(), device = input$l.filetype, width = input$l.plot.width, height = input$l.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+})
 
-reactive(ggsave(plot = l.print.plot2(), filename = l.filename.evre(), device = input$l.filetype, width = input$l.plot.width, height = input$l.plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
+# back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
 
 ## Variability Plot
@@ -452,11 +454,11 @@ v.filename.evre <- eventReactive(input$v.filesave, {
    paste0(wd.path, "/", input$v.filename, ".", input$v.filetype)
 })
 
-# Make this a function later, to then only print a specific plot
-v.print.plot <- fun_var_plot()
-v.print.plot2 <- reactive(v.print.plot() + theme_Tim())
-
-reactive(ggsave(plot = v.print.plot2(), filename = v.filename.evre(), device = input$v.filetype, width = input$v.plot.width, height = input$v.plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
+observeEvent(input$v.filesave, {
+  v.print.plot <- fun_var_plot()
+  v.print.plot2 <- reactive(v.print.plot() + theme_Tim())
+  ggsave(plot = v.print.plot2(), filename = v.filename.evre(), device = input$v.filetype, width = input$v.plot.width, height = input$v.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+})# back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
 
 ## Ratio Plot
@@ -523,21 +525,23 @@ renderPlot(ratio.plot() + theme_Tim(base.size = 20))
 ``` {r saving_ratio, echo = FALSE}
 ## ADD REACTIVE HERE for file name
 inputPanel(
-  textInput("filename", label = "Plot Name", placeholder = "Your input here"),
-  radioButtons("filetype", label = "File Type", choices = c('pdf', 'png','svg')),
-  sliderInput("plot.width", label = "Plot Width, cm", min = 1, max = 12, value = 6, step = 0.5),
-  sliderInput("plot.height", label = "Plot Height, cm", min = 1, max = 8, value = 3, step = 0.5),
-  actionButton("filesave", label = "Save File")
+  textInput("r.filename", label = "Plot Name", placeholder = "Your input here"),
+  radioButtons("r.filetype", label = "File Type", choices = c('pdf', 'png','svg')),
+  sliderInput("r.plot.width", label = "Plot Width, cm", min = 1, max = 12, value = 6, step = 0.5),
+  sliderInput("r.plot.height", label = "Plot Height, cm", min = 1, max = 8, value = 3, step = 0.5),
+  actionButton("r.filesave", label = "Save File")
 )
 
 # This event reactive causes the ggsave to wait because it requires input from the reactive filename function. I'm not sure that this is the most efficient, because potentially ggsave should also be eventReactive. Largely, this event reactivity is important so that ggsave does not save a new file for each character that is typed. 
-r.filename.evre <- eventReactive(input$filesave, {
-   paste0(wd.path, "/", input$filename, ".", input$filetype)
+r.filename.evre <- eventReactive(input$r.filesave, {
+   paste0(wd.path, "/", input$r.filename, ".", input$r.filetype)
 })
 
 # Make this a function later, to then only print a specific plot
-r.print.plot <- fun_ratio_plot()
-r.print.plot2 <- reactive(r.print.plot() + theme_Tim())
-
-reactive(ggsave(plot = r.print.plot2(), filename = r.filename.evre(), device = input$filetype, width = input$plot.width, height = input$plot.height, unit = 'cm', dpi = 300, bg = "transparent")) # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
+observeEvent(input$r.filesave, {
+  r.print.plot <- fun_ratio_plot()
+  r.print.plot2 <- reactive(r.print.plot() + theme_Tim())
+  ggsave(plot = r.print.plot2(), filename = r.filename.evre(), device = input$r.filetype, width = input$r.plot.width, height = input$r.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+})
+ # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
