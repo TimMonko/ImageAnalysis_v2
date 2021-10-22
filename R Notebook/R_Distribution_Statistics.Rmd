@@ -46,7 +46,7 @@ var.names <- all.data %>%
 iv.names <- all.data %>%
   colnames()
 
-rm.groups <- paste0(unique(all.data$age), "-",unique(all.data$region), "-", unique(all.data$pair)) # Var for removing variables 
+rm.groups <- paste0(unique(all.data$age), "-", unique(all.data$region), "-", unique(all.data$pair)) # Var for removing variables 
 ```
 
 # Interaction to prepare the data set for analysis. 
@@ -63,9 +63,10 @@ wellPanel(
 inputPanel(
   selectizeInput("numerator", label = "Numerator slice", choices = var.names, multiple = TRUE, options = list(create = TRUE)),
   selectizeInput("denominator", label = "Denominator slice", choices = var.names, multiple = TRUE, options = list(create = TRUE)),
-  selectizeInput("outlier.rm", label = "Outliers to remove", choices = rm.groups, multiple = TRUE),
+  selectizeInput("outlier.rm", label = "Outliers to remove", choices = rm.groups, multiple = TRUE, options = list(create = TRUE)),
   numericInput("rescale", label = "rescale px/um", value = 0.63492)
 )
+
 ```
 
 # Data Tables {.tabset}
@@ -83,13 +84,13 @@ re.all.data <- reactive({
     mutate(genotype = ordered(genotype, levels = input$genotype.ord)) %>%
     mutate(pair = ordered(pair, levels = input$pair.ord)) %>%
     mutate(region = ordered(region, levels = input$region.ord)) %>%
-    mutate(region.pair = paste0(region, "-", pair)) %>%
+    mutate(age.region.pair = paste0(age, "-", region, "-", pair)) %>%
     mutate(age = ordered(age, levels = input$age.ord)) %>%
     mutate(edu = ordered(edu, levels = input$edu.ord)) %>%
     # mutate(x.abs.right = (width-x)*input$rescale) %>% # This will be done later for interactive distribution graphs. Allows backwards compatability with non-R image analysis datasets
     # mutate(x.abs.left = x*input$rescale) %>%
     # mutate(x.rel.right = x/width) %>%
-    filter(region.pair %notin% input$outlier.rm)
+    filter(age.region.pair %notin% input$outlier.rm)
 })
 
 renderText("All Data")
@@ -105,7 +106,7 @@ This will look familiar to how most scientists would entire the data, this is kn
 re.file.data <- reactive({
   re.all.data() %>%
     group_by(file, age, genotype, z, pair, region) %>%
-    summarize(n.cells = mean(n)) # mean is not really a required function, and should be changed , but need to have a summarize function and mean is safe since they are all designed to be the 
+    count(n.cells = n) 
 })  
 re.file.wide <- reactive({
   re.file.data() %>%
@@ -123,7 +124,7 @@ Data summarized across pairs
 re.pair.data <- reactive({
   re.all.data() %>%
     group_by(file, age, genotype, z, pair, region) %>%
-    summarize(n.cells = mean(n)) %>%  # This is required because each original row represents one cell, so if the mean is taken without take file into consideration then it will be biased towards slices with more cells (because 552n*552rows is greater than 440n*440rows)
+    count(n.cells = n) %>%  # This is required because each original row represents one cell, so if the mean is taken without take file into consideration then it will be biased towards slices with more cells (because 552n*552rows is greater than 440n*440rows)
     group_by(age, genotype, z, pair, region) %>%
     summarize(n.cells.mean = mean(n.cells), n.sd.cells = sd(n.cells))
 })
@@ -206,8 +207,9 @@ This tab provides information on *pairs* within a genotype that may be outliers 
 
 summary.between <- reactive({
   re.pair.data() %>%
+    mutate(pair = factor(pair, ordered = FALSE)) %>%
     group_by(age, genotype, region, z) %>%
-    select(-n.sd.cells)
+    select(-n.sd.cells) # not sure if removing pair is the right thing to do, but it prevents the error of ordered pairs not matching
 })
 
 renderDT(get_summary_stats(summary.between(), type = "common"), filter="top", options = list(pageLength = 5, scrollX=TRUE))
@@ -373,12 +375,23 @@ l.filename.evre <- eventReactive(input$l.filesave, {
    paste0(wd.path, "/", input$l.filename, ".", input$l.filetype)
 })
 
+l.fileinfo <- eventReactive(input$l.filesave, {
+   paste0(input$l.filename, ".", input$l.filetype,
+          " saved with W:", input$l.plot.width, 
+          " H:", input$l.plot.height,
+          " Z:", input$l.z.plot, 
+          " and Pairs removed: ", input$outlier.rm)
+})
+l.txtname <- eventReactive(input$l.filesave, {
+  paste0(wd.path, "/", input$l.filename, ".txt")
+})
+
 observeEvent(input$l.filesave, {
   l.print.plot <- fun_log_plot()
   l.print.plot2 <- reactive(l.print.plot() + theme_Tim())
   ggsave(plot = l.print.plot2(), filename = l.filename.evre(), device = input$l.filetype, width = input$l.plot.width, height = input$l.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+  write.table(l.fileinfo(), file = l.txtname())
 })
-
 # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
 
@@ -454,10 +467,23 @@ v.filename.evre <- eventReactive(input$v.filesave, {
    paste0(wd.path, "/", input$v.filename, ".", input$v.filetype)
 })
 
+v.fileinfo <- eventReactive(input$v.filesave, {
+   paste0(input$v.filename, ".", input$v.filetype, 
+          " saved with W:", input$v.plot.width, 
+          " H:", input$v.plot.height,
+          " Z:", input$v.z.plot, 
+          " and Pairs removed: ", input$outlier.rm)
+})
+v.txtname <- eventReactive(input$v.filesave, {
+  paste0(wd.path, "/", input$v.filename, ".txt")
+})
+
+
 observeEvent(input$v.filesave, {
   v.print.plot <- fun_var_plot()
   v.print.plot2 <- reactive(v.print.plot() + theme_Tim())
   ggsave(plot = v.print.plot2(), filename = v.filename.evre(), device = input$v.filetype, width = input$v.plot.width, height = input$v.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+  write.table(v.fileinfo(), file = v.txtname())
 })# back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
 
@@ -537,11 +563,23 @@ r.filename.evre <- eventReactive(input$r.filesave, {
    paste0(wd.path, "/", input$r.filename, ".", input$r.filetype)
 })
 
+r.fileinfo <- eventReactive(input$r.filesave, {
+   paste0(input$r.filename, ".", input$r.filetype, 
+          " saved with W:", input$r.plot.width, 
+          " H:", input$r.plot.height,
+          " Z:", input$r.z.plot, 
+          " and Pairs removed: ", input$outlier.rm)
+})
+r.txtname <- eventReactive(input$r.filesave, {
+  paste0(wd.path, "/", input$r.filename, ".txt")
+})
+
 # Make this a function later, to then only print a specific plot
 observeEvent(input$r.filesave, {
   r.print.plot <- fun_ratio_plot()
   r.print.plot2 <- reactive(r.print.plot() + theme_Tim())
   ggsave(plot = r.print.plot2(), filename = r.filename.evre(), device = input$r.filetype, width = input$r.plot.width, height = input$r.plot.height, unit = 'cm', dpi = 600, bg = "transparent")
+  write.table(r.fileinfo(), file = r.txtname())
 })
  # back in a previous version of ggsave/svglite, a 1.32 conversion was required because it was printed from 70 to 96dpi conversion factor. Nowadays, this appears to be fixed for all file types, so no requirement to have a dpi conversion factor. Also, .pdf is the preferable 
 ```
